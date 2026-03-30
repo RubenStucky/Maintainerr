@@ -32,4 +32,5 @@ export enum ServarrAction {
   UNMONITOR_DELETE_EXISTING,
   UNMONITOR,
   DO_NOTHING,
+  REQUEST_NEXT_SEASON,
 }

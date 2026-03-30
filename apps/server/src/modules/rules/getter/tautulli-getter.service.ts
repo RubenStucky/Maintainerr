@@ -4,16 +4,16 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PlexApiService } from '../../api/plex-api/plex-api.service';
 import {
-  TautulliApiService,
-  TautulliHistoryRequestOptions,
-  TautulliMetadata,
+    TautulliApiService,
+    TautulliHistoryRequestOptions,
+    TautulliMetadata,
 } from '../../api/tautulli-api/tautulli-api.service';
 import { Collection } from '../../collections/entities/collection.entities';
 import { MaintainerrLogger } from '../../logging/logs.service';
 import {
-  Application,
-  Property,
-  RuleConstants,
+    Application,
+    Property,
+    RuleConstants,
 } from '../constants/rules.constants';
 import { RulesDto } from '../dtos/rules.dto';
 
@@ -170,6 +170,42 @@ export class TautulliGetterService {
           const uniqueEpisodes = [...new Set(watchedEpisodes)];
 
           return uniqueEpisodes.length;
+        }
+        case 'sw_watchedPercentage': {
+          const pctHistory = await this.getHistoryForMetadata(metadata);
+
+          const pctWatchedEpisodes = pctHistory
+            .filter((x) =>
+              tautulliWatchedPercentOverride != null
+                ? x.percent_complete >= tautulliWatchedPercentOverride
+                : x.watched_status == 1,
+            )
+            .map((x) => x.rating_key);
+
+          const pctUniqueEpisodes = [...new Set(pctWatchedEpisodes)];
+
+          // Get total episode count via children metadata
+          let totalEpCount = 0;
+          if (metadata.media_type === 'season') {
+            const eps = await this.tautulliApi.getChildrenMetadata(
+              metadata.rating_key,
+            );
+            totalEpCount = eps?.length ?? 0;
+          } else if (metadata.media_type === 'show') {
+            const seasons = await this.tautulliApi.getChildrenMetadata(
+              metadata.rating_key,
+            );
+            for (const season of seasons ?? []) {
+              const eps = await this.tautulliApi.getChildrenMetadata(
+                season.rating_key,
+              );
+              totalEpCount += eps?.length ?? 0;
+            }
+          }
+
+          return totalEpCount > 0
+            ? Math.round((pctUniqueEpisodes.length / totalEpCount) * 100)
+            : 0;
         }
         case 'sw_lastWatched': {
           let history = await this.getHistoryForMetadata(metadata);

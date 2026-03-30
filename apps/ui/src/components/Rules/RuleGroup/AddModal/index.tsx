@@ -194,9 +194,12 @@ const ruleGroupFormSchema = z
     },
   )
   .superRefine((data, ctx) => {
+    // Skip *arr server requirement for "Request next season" (5) and "Do nothing" (4)
     if (
       data.radarrSettingsId === undefined &&
-      data.sonarrSettingsId === undefined
+      data.sonarrSettingsId === undefined &&
+      data.arrAction !== 5 &&
+      data.arrAction !== 4
     ) {
       ctx.addIssue({
         code: 'custom',
@@ -214,6 +217,7 @@ const ruleGroupFormSchema = z
     (data) =>
       data.arrAction === undefined ||
       data.arrAction === 4 ||
+      data.arrAction === 5 ||
       data.deleteAfterDays !== undefined,
     {
       path: ['deleteAfterDays'],
@@ -377,7 +381,7 @@ const AddModal = (props: AddModal) => {
   function updateArrOption(value: number | undefined) {
     setValue('arrAction', value)
 
-    if (value === undefined || value === 4) {
+    if (value === undefined || value === 4 || value === 5) {
       setValue('deleteAfterDays', undefined)
     } else if (getValues('deleteAfterDays') === undefined) {
       setValue('deleteAfterDays', 30)
@@ -518,7 +522,9 @@ const AddModal = (props: AddModal) => {
         visibleOnRecommended: data.showRecommended,
         visibleOnHome: data.showHome,
         deleteAfterDays:
-          data.arrAction === undefined || data.arrAction === 4
+          data.arrAction === undefined ||
+          data.arrAction === 4 ||
+          data.arrAction === 5
             ? undefined
             : data.deleteAfterDays,
         manualCollection: data.manualCollection,
@@ -822,6 +828,10 @@ const AddModal = (props: AddModal) => {
                                     id: 4,
                                     name: 'Do nothing',
                                   },
+                                  {
+                                    id: 5,
+                                    name: 'Request next season (Seerr)',
+                                  },
                                 ]
                               : // episodes
                                 [
@@ -848,7 +858,9 @@ const AddModal = (props: AddModal) => {
                     </>
                   )}
 
-                  {arrActionValue !== undefined && arrActionValue !== 4 && (
+                  {arrActionValue !== undefined &&
+                    arrActionValue !== 4 &&
+                    arrActionValue !== 5 && (
                     <div className="form-row items-center">
                       <label
                         htmlFor="collection_deleteDays"

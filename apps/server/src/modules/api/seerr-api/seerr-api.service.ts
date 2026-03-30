@@ -2,13 +2,13 @@ import { BasicResponseDto } from '@maintainerr/contracts';
 import { forwardRef, Inject, Injectable } from '@nestjs/common';
 import { SettingsService } from '../../../modules/settings/settings.service';
 import {
-  CONNECTION_TEST_TIMEOUT_MS,
-  formatConnectionFailureMessage,
-  logConnectionTestError,
+    CONNECTION_TEST_TIMEOUT_MS,
+    formatConnectionFailureMessage,
+    logConnectionTestError,
 } from '../../../utils/connection-error';
 import {
-  MaintainerrLogger,
-  MaintainerrLoggerFactory,
+    MaintainerrLogger,
+    MaintainerrLoggerFactory,
 } from '../../logging/logs.service';
 import { SeerrApi } from './helpers/seerr-api.helper';
 
@@ -383,6 +383,81 @@ export class SeerrApiService {
       this.logger.debug(error);
       return null;
     }
+  }
+
+  /**
+   * Create a media request in Overseerr/Jellyseerr.
+   * @param mediaType 'movie' or 'tv'
+   * @param mediaId TMDb ID of the media
+   * @param seasons Array of season numbers to request (only for TV)
+   * @param userId Optional Seerr user ID to make the request on behalf of
+   */
+  public async createRequest(
+    mediaType: 'movie' | 'tv',
+    mediaId: number,
+    seasons?: number[],
+    userId?: number,
+  ): Promise<SeerrRequest | undefined> {
+    try {
+      const body: Record<string, unknown> = {
+        mediaType,
+        mediaId,
+      };
+
+      if (mediaType === 'tv' && seasons?.length) {
+        body.seasons = seasons;
+      }
+
+      if (userId) {
+        body.userId = userId;
+      }
+
+      const response = await this.api.post<SeerrRequest>('/request', body);
+      return response;
+    } catch (error) {
+      this.logger.warn(
+        `Seerr request creation failed for mediaId ${mediaId}`,
+      );
+      this.logger.debug(error);
+      return undefined;
+    }
+  }
+
+  /**
+   * Resolve a Plex or Jellyfin username to a Seerr user ID.
+   * First checks plexUsername, then jellyfinUsername, then falls back to displayName / username.
+   */
+  public async getUserIdByUsername(
+    username: string,
+  ): Promise<number | undefined> {
+    const users = await this.getUsers();
+    const lower = username.toLowerCase();
+
+    const match = users.find(
+      (u) =>
+        u.plexUsername?.toLowerCase() === lower ||
+        u.username?.toLowerCase() === lower ||
+        u.displayName?.toLowerCase() === lower,
+    );
+
+    return match?.id;
+  }
+
+  /**
+   * Check if a specific season of a TV show already has an active request.
+   */
+  public async isSeasonRequested(
+    tmdbId: number,
+    seasonNumber: number,
+  ): Promise<boolean> {
+    const show = await this.getShow(tmdbId);
+    if (!show?.mediaInfo?.requests) {
+      return false;
+    }
+
+    return show.mediaInfo.requests.some((req) =>
+      req.seasons?.some((s) => s.seasonNumber === seasonNumber),
+    );
   }
 
   public async testConnection(

@@ -380,6 +380,31 @@ export class PlexGetterService {
           }
           return viewCount;
         }
+        case 'sw_watchedPercentage': {
+          let totalEpisodes = 0;
+          let watchedEpisodes = 0;
+          const seasonsForPct =
+            metadata.type !== 'season'
+              ? await this.plexApi.getChildrenMetadata(metadata.ratingKey)
+              : [metadata];
+          for (const season of seasonsForPct) {
+            const episodes = await this.plexApi.getChildrenMetadata(
+              season.ratingKey,
+            );
+            totalEpisodes += episodes.length;
+            for (const episode of episodes) {
+              const views = await this.plexApi.getWatchHistory(
+                episode.ratingKey,
+              );
+              if (views?.length > 0) {
+                watchedEpisodes++;
+              }
+            }
+          }
+          return totalEpisodes > 0
+            ? Math.round((watchedEpisodes / totalEpisodes) * 100)
+            : 0;
+        }
         case 'sw_amountOfViews': {
           let viewCount = 0;
 

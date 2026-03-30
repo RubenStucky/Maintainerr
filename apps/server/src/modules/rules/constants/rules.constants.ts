@@ -450,6 +450,14 @@ export class RuleConstants {
           cacheReset: true,
           migrateTo: 'collection_names',
         },
+        {
+          id: 43,
+          name: 'sw_watchedPercentage',
+          humanName: 'Percentage of watched episodes (%)',
+          mediaType: MediaType.SHOW,
+          type: RuleType.NUMBER,
+          showType: ['season', 'show'],
+        },
       ],
     },
     {
@@ -1007,6 +1015,14 @@ export class RuleConstants {
           type: RuleType.TEXT_LIST, // return usernames []
           showType: ['show', 'season', 'episode'],
         },
+        {
+          id: 9,
+          name: 'sw_watchedPercentage',
+          humanName: 'Percentage of watched episodes (%)',
+          mediaType: MediaType.SHOW,
+          type: RuleType.NUMBER,
+          showType: ['season', 'show'],
+        },
       ],
     },
     {
@@ -1329,6 +1345,14 @@ export class RuleConstants {
           mediaType: MediaType.SHOW,
           type: RuleType.TEXT_LIST,
           showType: ['season', 'episode'],
+        },
+        {
+          id: 42,
+          name: 'sw_watchedPercentage',
+          humanName: 'Percentage of watched episodes (%)',
+          mediaType: MediaType.SHOW,
+          type: RuleType.NUMBER,
+          showType: ['season', 'show'],
         },
       ],
     },

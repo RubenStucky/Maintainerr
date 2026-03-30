@@ -1,17 +1,17 @@
 import {
-  isMediaType,
-  MediaItem,
-  MediaItemType,
-  RuleValueType,
+    isMediaType,
+    MediaItem,
+    MediaItemType,
+    RuleValueType,
 } from '@maintainerr/contracts';
 import { Injectable } from '@nestjs/common';
 import cacheManager, { Cache } from '../../api/lib/cache';
 import { JellyfinAdapterService } from '../../api/media-server/jellyfin/jellyfin-adapter.service';
 import { MaintainerrLogger } from '../../logging/logs.service';
 import {
-  Application,
-  Property,
-  RuleConstants,
+    Application,
+    Property,
+    RuleConstants,
 } from '../constants/rules.constants';
 import { RulesDto } from '../dtos/rules.dto';
 import { buildCollectionExcludeNames } from '../helpers/collection-exclude.helper';
@@ -227,6 +227,20 @@ export class JellyfinGetterService {
 
         case 'sw_viewedEpisodes': {
           return await this.getViewedEpisodeCount(metadata.id, metadata.type);
+        }
+
+        case 'sw_watchedPercentage': {
+          const totalEps = await this.getEpisodeCount(
+            metadata.id,
+            metadata.type,
+          );
+          const watchedEps = await this.getViewedEpisodeCount(
+            metadata.id,
+            metadata.type,
+          );
+          return totalEps > 0
+            ? Math.round((watchedEps / totalEps) * 100)
+            : 0;
         }
 
         case 'sw_lastEpisodeAddedAt': {
