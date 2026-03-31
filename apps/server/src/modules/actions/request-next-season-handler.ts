@@ -117,7 +117,20 @@ export class RequestNextSeasonHandler {
     // Step 5: Resolve a Seerr user to make the request on behalf of.
     // Pick the watcher who has watched the most episodes of the current season
     // (i.e. closest to needing the next season), then map to a Seerr user ID.
+    // Skip any user who has already watched (part of) the next season.
     let seerrUserId: number | undefined;
+    let chosenUsername: string | undefined;
+
+    // Resolve the next season's media server ID so we can check watch history
+    const showId = mediaData.parentId;
+    let nextSeasonMediaServerId: string | undefined;
+    if (showId) {
+      const showSeasons = await mediaServer.getChildrenMetadata(showId);
+      const nextSeason = showSeasons?.find(
+        (s) => s.index === nextSeasonNumber,
+      );
+      nextSeasonMediaServerId = nextSeason?.id;
+    }
 
     const watcherProgress = await this.getWatcherProgressForSeason(
       mediaServer,
@@ -129,11 +142,29 @@ export class RequestNextSeasonHandler {
       watcherProgress.sort((a, b) => b.episodesWatched - a.episodesWatched);
 
       for (const watcher of watcherProgress) {
+        // Check if this user has already watched part of the next season
+        if (nextSeasonMediaServerId) {
+          const hasWatchedNextSeason =
+            await this.hasUserWatchedAnySeason(
+              mediaServer,
+              nextSeasonMediaServerId,
+              watcher.userId,
+            );
+
+          if (hasWatchedNextSeason) {
+            this.logger.log(
+              `Skipping user '${watcher.username}' — already watched (part of) season ${nextSeasonNumber}`,
+            );
+            continue;
+          }
+        }
+
         const userId = await this.seerrApi.getUserIdByUsername(
           watcher.username,
         );
         if (userId) {
           seerrUserId = userId;
+          chosenUsername = watcher.username;
           this.logger.log(
             `Resolved Seerr user '${watcher.username}' (${watcher.episodesWatched} episodes watched) for next season request`,
           );
@@ -149,6 +180,18 @@ export class RequestNextSeasonHandler {
         const originalRequest = seerrShow.mediaInfo.requests[0];
         seerrUserId = originalRequest.requestedBy?.id;
       }
+    }
+
+    // If all watchers have already seen the next season, skip entirely
+    if (
+      !seerrUserId &&
+      watcherProgress.length > 0 &&
+      !chosenUsername
+    ) {
+      this.logger.log(
+        `All watchers of season ${currentSeasonNumber} of '${tmdbShow.name}' have already watched (part of) season ${nextSeasonNumber}. Skipping request.`,
+      );
+      return;
     }
 
     if (!seerrUserId) {
@@ -222,6 +265,33 @@ export class RequestNextSeasonHandler {
     } catch (error) {
       this.logger.debug(error);
       return [];
+    }
+  }
+
+  /**
+   * Check whether a specific user has watched at least one episode of a season.
+   */
+  private async hasUserWatchedAnySeason(
+    mediaServer: Awaited<ReturnType<MediaServerFactory['getService']>>,
+    seasonMediaServerId: string,
+    userId: string,
+  ): Promise<boolean> {
+    try {
+      const episodes =
+        await mediaServer.getChildrenMetadata(seasonMediaServerId);
+      if (!episodes?.length) return false;
+
+      for (const episode of episodes) {
+        const watchHistory = await mediaServer.getWatchHistory(episode.id);
+        if (watchHistory?.some((entry) => entry.userId === userId)) {
+          return true;
+        }
+      }
+
+      return false;
+    } catch (error) {
+      this.logger.debug(error);
+      return false;
     }
   }
 }
