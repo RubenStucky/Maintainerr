@@ -81,7 +81,7 @@ export class RequestNextSeasonHandler {
       return;
     }
 
-    // Step 3: Check if a next season exists on TMDb
+    // Step 3: Check if a next season exists on TMDb (safety net — prefer sw_nextSeasonExists rule constant)
     const tmdbShow = await this.tmdbApi.getTvShow({ tvId: tmdbId });
     if (!tmdbShow) {
       this.logger.warn(
@@ -96,12 +96,12 @@ export class RequestNextSeasonHandler {
 
     if (!nextSeasonExists) {
       this.logger.log(
-        `No next season (S${String(nextSeasonNumber).padStart(2, '0')}) exists for '${tmdbShow.name}' (tmdbId: ${tmdbId}). Skipping request.`,
+        `No next season (S${String(nextSeasonNumber).padStart(2, '0')}) exists for '${tmdbShow.name}' (tmdbId: ${tmdbId}). Skipping request. Consider using the 'Next season exists (TMDb)' rule constant to prevent items from entering the collection.`,
       );
       return;
     }
 
-    // Step 4: Check if the next season is already requested in Seerr
+    // Step 4: Check if the next season is already requested in Seerr (safety net — prefer sw_nextSeasonRequested rule constant)
     const alreadyRequested = await this.seerrApi.isSeasonRequested(
       tmdbId,
       nextSeasonNumber,
@@ -109,7 +109,7 @@ export class RequestNextSeasonHandler {
 
     if (alreadyRequested) {
       this.logger.log(
-        `Season ${nextSeasonNumber} of '${tmdbShow.name}' is already requested in Seerr. Skipping.`,
+        `Season ${nextSeasonNumber} of '${tmdbShow.name}' is already requested in Seerr. Skipping. Consider using the 'Next season already requested in Seerr' rule constant to prevent items from entering the collection.`,
       );
       return;
     }
@@ -119,7 +119,6 @@ export class RequestNextSeasonHandler {
     // (i.e. closest to needing the next season), then map to a Seerr user ID.
     // Skip any user who has already watched (part of) the next season.
     let seerrUserId: number | undefined;
-    let chosenUsername: string | undefined;
 
     // Resolve the next season's media server ID so we can check watch history
     const showId = mediaData.parentId;
@@ -130,6 +129,23 @@ export class RequestNextSeasonHandler {
         (s) => s.index === nextSeasonNumber,
       );
       nextSeasonMediaServerId = nextSeason?.id;
+
+      // If the next season isn't on the media server but a HIGHER-numbered season exists,
+      // it means the next season was previously downloaded and then deleted (watched & cleaned up).
+      // Don't re-request it.
+      if (!nextSeasonMediaServerId && showSeasons?.length) {
+        const higherSeasonExists = showSeasons.some(
+          (s) => s.index > nextSeasonNumber,
+        );
+        if (higherSeasonExists) {
+          this.logger.log(
+            `Season ${nextSeasonNumber} of '${tmdbShow.name}' is not on the media server, but a higher season exists ` +
+              `(indices: ${showSeasons.map((s) => s.index).join(', ')}). ` +
+              `It was likely already downloaded, watched, and deleted. Skipping request.`,
+          );
+          return;
+        }
+      }
     }
 
     const watcherProgress = await this.getWatcherProgressForSeason(
@@ -140,6 +156,9 @@ export class RequestNextSeasonHandler {
     if (watcherProgress.length > 0) {
       // Sort descending by episodes watched — the user closest to the next season comes first
       watcherProgress.sort((a, b) => b.episodesWatched - a.episodesWatched);
+
+      let skippedDueToWatched = 0;
+
 
       for (const watcher of watcherProgress) {
         // Check if this user has already watched part of the next season
@@ -153,8 +172,9 @@ export class RequestNextSeasonHandler {
 
           if (hasWatchedNextSeason) {
             this.logger.log(
-              `Skipping user '${watcher.username}' — already watched (part of) season ${nextSeasonNumber}`,
+              `Skipping user '${watcher.username}' (id: ${watcher.userId}) — already watched (part of) season ${nextSeasonNumber}`,
             );
+            skippedDueToWatched++;
             continue;
           }
         }
@@ -164,12 +184,23 @@ export class RequestNextSeasonHandler {
         );
         if (userId) {
           seerrUserId = userId;
-          chosenUsername = watcher.username;
           this.logger.log(
             `Resolved Seerr user '${watcher.username}' (${watcher.episodesWatched} episodes watched) for next season request`,
           );
           break;
+        } else {
+          this.logger.debug(
+            `Could not resolve Seerr user for watcher '${watcher.username}' (media server userId: ${watcher.userId})`,
+          );
         }
+      }
+
+      // If ALL watchers have already seen the next season, skip entirely
+      if (skippedDueToWatched === watcherProgress.length) {
+        this.logger.log(
+          `All ${watcherProgress.length} watcher(s) of season ${currentSeasonNumber} of '${tmdbShow.name}' have already watched (part of) season ${nextSeasonNumber}. Skipping request.`,
+        );
+        return;
       }
     }
 
@@ -180,18 +211,6 @@ export class RequestNextSeasonHandler {
         const originalRequest = seerrShow.mediaInfo.requests[0];
         seerrUserId = originalRequest.requestedBy?.id;
       }
-    }
-
-    // If all watchers have already seen the next season, skip entirely
-    if (
-      !seerrUserId &&
-      watcherProgress.length > 0 &&
-      !chosenUsername
-    ) {
-      this.logger.log(
-        `All watchers of season ${currentSeasonNumber} of '${tmdbShow.name}' have already watched (part of) season ${nextSeasonNumber}. Skipping request.`,
-      );
-      return;
     }
 
     if (!seerrUserId) {
@@ -254,14 +273,36 @@ export class RequestNextSeasonHandler {
         }
       }
 
-      // Convert to result array with episode count.
-      // userId from the media server is used as the username for Seerr lookup,
-      // since media server watch records store the user identifier.
-      return Array.from(userEpisodeMap.values()).map((entry) => ({
-        userId: entry.userId,
-        username: entry.userId,
-        episodesWatched: entry.episodeKeys.size,
-      }));
+      // Resolve actual usernames from the media server.
+      // WatchRecord.userId is a numeric accountID (Plex) or UUID (Jellyfin),
+      // but Seerr needs the human-readable username for lookup.
+      const results: {
+        userId: string;
+        username: string;
+        episodesWatched: number;
+      }[] = [];
+
+      for (const entry of userEpisodeMap.values()) {
+        let username = entry.userId; // fallback to raw ID
+        try {
+          const mediaUser = await mediaServer.getUser(entry.userId);
+          if (mediaUser?.name) {
+            username = mediaUser.name;
+          }
+        } catch {
+          this.logger.debug(
+            `Could not resolve username for media server userId '${entry.userId}'`,
+          );
+        }
+
+        results.push({
+          userId: entry.userId,
+          username,
+          episodesWatched: entry.episodeKeys.size,
+        });
+      }
+
+      return results;
     } catch (error) {
       this.logger.debug(error);
       return [];
@@ -279,7 +320,12 @@ export class RequestNextSeasonHandler {
     try {
       const episodes =
         await mediaServer.getChildrenMetadata(seasonMediaServerId);
-      if (!episodes?.length) return false;
+      if (!episodes?.length) {
+        this.logger.debug(
+          `hasUserWatchedAnySeason: no episodes found for season ${seasonMediaServerId}`,
+        );
+        return false;
+      }
 
       for (const episode of episodes) {
         const watchHistory = await mediaServer.getWatchHistory(episode.id);

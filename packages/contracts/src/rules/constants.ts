@@ -87,6 +87,10 @@ export enum RequestMediaStatus {
   PROCESSING = 3,
   PARTIALLY_AVAILABLE = 4,
   AVAILABLE = 5,
+  /** Jellyseerr only — Overseerr skips this value */
+  BLOCKLISTED = 6,
+  /** Jellyseerr uses 7, Overseerr uses 6 — check with isDeletedStatus() */
+  DELETED = 7,
 }
 
 export const DISKSPACE_REMAINING_PROPERTY = 'diskspace_remaining_gb'

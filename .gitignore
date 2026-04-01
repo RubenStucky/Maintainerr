@@ -15,3 +15,7 @@ jellyfin-dev-documents/
 
 # External dependencies (local only)
 .external/
+
+# Deploy script (contains credentials)
+deploy.sh
+deploy.ps1

@@ -2,10 +2,10 @@ import { MediaItem, MediaItemType } from '@maintainerr/contracts';
 import { Injectable } from '@nestjs/common';
 import _ from 'lodash';
 import {
-  SonarrEpisode,
-  SonarrEpisodeFile,
-  SonarrSeason,
-  SonarrSeries,
+    SonarrEpisode,
+    SonarrEpisodeFile,
+    SonarrSeason,
+    SonarrSeries,
 } from '../../../modules/api/servarr-api/interfaces/sonarr.interface';
 import { ServarrService } from '../../../modules/api/servarr-api/servarr.service';
 import { TmdbIdService } from '../../../modules/api/tmdb-api/tmdb-id.service';
@@ -15,9 +15,9 @@ import { IMediaServerService } from '../../api/media-server/media-server.interfa
 import { SonarrApi } from '../../api/servarr-api/helpers/sonarr.helper';
 import { MaintainerrLogger } from '../../logging/logs.service';
 import {
-  Application,
-  Property,
-  RuleConstants,
+    Application,
+    Property,
+    RuleConstants,
 } from '../constants/rules.constants';
 import { RuleDto } from '../dtos/rule.dto';
 import { RulesDto } from '../dtos/rules.dto';
@@ -416,6 +416,35 @@ export class SonarrGetterService {
             ? showResponse.statistics.episodeCount -
                 showResponse.statistics.episodeFileCount
             : null;
+        }
+        case 'sw_nextSeasonExists': {
+          // Check if the next season exists on TMDb
+          if (dataType !== 'season' || !seasonRatingKey) {
+            return null;
+          }
+
+          const tmdbResult =
+            await this.tmdbIdHelper.getTmdbIdFromMediaItem(libItem);
+          if (!tmdbResult?.id) {
+            this.logger.warn(
+              `Could not resolve TMDb ID for '${libItem.title}'. Cannot check next season existence.`,
+            );
+            return null;
+          }
+
+          const tmdbShow = await this.tmdbApi.getTvShow({
+            tvId: tmdbResult.id,
+          });
+          if (!tmdbShow?.seasons) {
+            return 0;
+          }
+
+          const nextSeason = seasonRatingKey + 1;
+          return tmdbShow.seasons.some(
+            (s) => s.season_number === nextSeason,
+          )
+            ? 1
+            : 0;
         }
       }
     } catch (error) {

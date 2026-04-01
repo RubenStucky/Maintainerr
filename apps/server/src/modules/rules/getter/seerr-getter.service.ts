@@ -224,6 +224,44 @@ export class SeerrGetterService {
               return 0;
             }
           }
+          case 'sw_nextSeasonRequested': {
+            // Check if the *next* season is already requested in Seerr
+            if (dataType !== 'season' || !origLibItem?.index) {
+              return null;
+            }
+
+            try {
+              const nextSeasonNumber = origLibItem.index + 1;
+              const isRequested = await this.seerrApi.isSeasonRequested(
+                tmdb.id,
+                nextSeasonNumber,
+              );
+              return isRequested ? 1 : 0;
+            } catch (error) {
+              this.logger.debug(error);
+              return 0;
+            }
+          }
+          case 'sw_nextSeasonDeletedInSeerr': {
+            // Check if the *next* season is marked as deleted in Seerr
+            // (i.e. it was previously available but has since been removed)
+            if (dataType !== 'season' || !origLibItem?.index) {
+              return null;
+            }
+
+            try {
+              const nextSeasonNumber = origLibItem.index + 1;
+              const isDeleted = await this.seerrApi.isSeasonDeleted(
+                tmdb.id,
+                nextSeasonNumber,
+              );
+
+              return isDeleted ? 1 : 0;
+            } catch (error) {
+              this.logger.debug(error);
+              return 0;
+            }
+          }
           default: {
             return null;
           }

@@ -1,14 +1,14 @@
-import { BasicResponseDto } from '@maintainerr/contracts';
+import { BasicResponseDto, RequestMediaStatus } from '@maintainerr/contracts';
 import { forwardRef, Inject, Injectable } from '@nestjs/common';
 import { SettingsService } from '../../../modules/settings/settings.service';
 import {
-    CONNECTION_TEST_TIMEOUT_MS,
-    formatConnectionFailureMessage,
-    logConnectionTestError,
+  CONNECTION_TEST_TIMEOUT_MS,
+  formatConnectionFailureMessage,
+  logConnectionTestError,
 } from '../../../utils/connection-error';
 import {
-    MaintainerrLogger,
-    MaintainerrLoggerFactory,
+  MaintainerrLogger,
+  MaintainerrLoggerFactory,
 } from '../../logging/logs.service';
 import { SeerrApi } from './helpers/seerr-api.helper';
 
@@ -43,7 +43,14 @@ export interface SeerrTVResponse {
 interface SeerrTVInfo extends SeerrMediaInfo {
   mediaType: 'tv';
   requests?: SeerrTVRequest[];
-  seasons?: SeerrSeasonResponse[];
+  seasons?: SeerrMediaInfoSeason[];
+}
+
+/** Per-season media status from Seerr's mediaInfo.seasons array */
+interface SeerrMediaInfoSeason {
+  id: number;
+  seasonNumber: number;
+  status: number;
 }
 
 export interface SeerrSeasonResponse {
@@ -458,6 +465,33 @@ export class SeerrApiService {
     return show.mediaInfo.requests.some((req) =>
       req.seasons?.some((s) => s.seasonNumber === seasonNumber),
     );
+  }
+
+  /**
+   * Check if a specific season of a TV show is marked as deleted in Seerr.
+   * Overseerr uses status 6 for DELETED, Jellyseerr uses 7 (6 = BLOCKLISTED).
+   */
+  public async isSeasonDeleted(
+    tmdbId: number,
+    seasonNumber: number,
+  ): Promise<boolean> {
+    const show = await this.getShow(tmdbId);
+    if (!show?.mediaInfo?.seasons) {
+      return false;
+    }
+
+    const season = show.mediaInfo.seasons.find(
+      (s) => s.seasonNumber === seasonNumber,
+    );
+
+    if (!season) {
+      return false;
+    }
+
+    // Overseerr: DELETED = 6 (no BLOCKLISTED)
+    // Jellyseerr: BLOCKLISTED = 6, DELETED = 7
+    // Accept both 6 and 7 as "deleted" to support both variants
+    return season.status === RequestMediaStatus.BLOCKLISTED || season.status === RequestMediaStatus.DELETED;
   }
 
   public async testConnection(
