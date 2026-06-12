@@ -16,12 +16,19 @@ interface ItemRef {
   id: string;
   parentId?: string;
   grandparentId?: string;
+  index?: number;
+  parentIndex?: number;
 }
 
 /**
  * Return the completions (preloaded on the rule group DTO) that apply to a
  * media item. A completion applies to the exact media item it was recorded
  * for and to that item's children (e.g. episodes of a handled season).
+ *
+ * Media server ids change when an item is deleted and re-downloaded, so a
+ * completion also applies when its recorded parent (the show) and season
+ * number line up with the evaluated item — that combination is stable as
+ * long as the show itself remains on the server.
  */
 export function getHandledCompletionsForItem(
   ruleGroup: RulesDto | undefined,
@@ -36,7 +43,14 @@ export function getHandledCompletionsForItem(
     (c) =>
       c.mediaServerId === item.id ||
       (item.parentId && c.mediaServerId === item.parentId) ||
-      (item.grandparentId && c.mediaServerId === item.grandparentId),
+      (item.grandparentId && c.mediaServerId === item.grandparentId) ||
+      (c.parent != null &&
+        c.seasonIndex != null &&
+        // the evaluated item is the (re-added) season itself
+        ((item.parentId === c.parent && item.index === c.seasonIndex) ||
+          // the evaluated item is an episode of the (re-added) season
+          (item.grandparentId === c.parent &&
+            item.parentIndex === c.seasonIndex))),
   );
 }
 

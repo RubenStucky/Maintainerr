@@ -61,6 +61,10 @@ export class PlexGetterService {
         id: libItem.id,
         parentId: libItem.parentId ?? metadata?.parentRatingKey,
         grandparentId: libItem.grandparentId ?? metadata?.grandparentRatingKey,
+        index: libItem.index ?? (metadata?.index ? +metadata.index : undefined),
+        parentIndex:
+          libItem.parentIndex ??
+          (metadata?.parentIndex ? +metadata.parentIndex : undefined),
       });
 
       // Parent/grandparent metadata is only needed for some properties.
