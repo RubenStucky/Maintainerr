@@ -9,6 +9,7 @@ import { RuleGroup } from '../rules/entities/rule-group.entities';
 import { MediaIdFinder } from './media-id-finder';
 import { RadarrActionHandler } from './radarr-action-handler';
 import { RequestNextSeasonHandler } from './request-next-season-handler';
+import { RuleActionCompletionRecorder } from './rule-action-completion-recorder.service';
 import { SonarrActionHandler } from './sonarr-action-handler';
 
 @Module({
@@ -23,9 +24,15 @@ import { SonarrActionHandler } from './sonarr-action-handler';
     RadarrActionHandler,
     SonarrActionHandler,
     RequestNextSeasonHandler,
+    RuleActionCompletionRecorder,
     MediaIdFinder,
   ],
-  exports: [RadarrActionHandler, SonarrActionHandler, RequestNextSeasonHandler],
+  exports: [
+    RadarrActionHandler,
+    SonarrActionHandler,
+    RequestNextSeasonHandler,
+    RuleActionCompletionRecorder,
+  ],
   controllers: [],
 })
 export class ActionsModule {}
