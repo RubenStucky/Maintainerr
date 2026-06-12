@@ -22,11 +22,13 @@ export class RuleActionCompletionRecorder {
   }
 
   /**
-   * Record rule completions for every user that watched (part of) the media
-   * item, when the rule group opts in via excludeHandledUsers. Used by
-   * generic collection actions (delete, unmonitor, ...) so the watchers'
-   * stats are excluded from future rule evaluations and the rule doesn't
-   * re-trigger for them when the media is re-added.
+   * Record rule completions for every user that fully watched the media
+   * item (for seasons/shows: saw all available episodes), when the rule
+   * group opts in via excludeHandledUsers. Used by generic collection
+   * actions (delete, unmonitor, ...) so those users' stats are excluded
+   * from future rule evaluations and the rule doesn't re-trigger for them
+   * when the media is re-added. Partial watchers are NOT recorded — their
+   * stats keep counting.
    *
    * Must be called BEFORE the media is deleted from the media server, since
    * it reads the item's watch history.
@@ -48,10 +50,11 @@ export class RuleActionCompletionRecorder {
       const seasonIndex =
         collection.type === 'season' ? (mediaData?.index ?? null) : null;
 
-      const history = await mediaServer.getWatchHistory(media.mediaServerId);
-      const watcherIds = [
-        ...new Set((history ?? []).map((r) => r.userId).filter(Boolean)),
-      ];
+      const watcherIds = await this.getUsersWhoSawAllEpisodes(
+        mediaServer,
+        media.mediaServerId,
+        collection.type,
+      );
       if (watcherIds.length === 0) {
         return;
       }
@@ -97,5 +100,58 @@ export class RuleActionCompletionRecorder {
       );
       this.logger.debug(error);
     }
+  }
+
+  /**
+   * Users that fully consumed the media item. For movies and episodes:
+   * anyone in its watch history. For seasons and shows: only users that
+   * appear in the watch history of EVERY available episode.
+   */
+  private async getUsersWhoSawAllEpisodes(
+    mediaServer: Awaited<ReturnType<MediaServerFactory['getService']>>,
+    mediaServerId: string,
+    type: Collection['type'],
+  ): Promise<string[]> {
+    if (type === 'movie' || type === 'episode') {
+      const history = await mediaServer.getWatchHistory(mediaServerId);
+      return [...new Set((history ?? []).map((r) => r.userId).filter(Boolean))];
+    }
+
+    // seasons & shows: gather all episode ids
+    const episodeIds: string[] = [];
+    if (type === 'season') {
+      const episodes = await mediaServer.getChildrenMetadata(mediaServerId);
+      episodeIds.push(...(episodes ?? []).map((e) => e.id));
+    } else {
+      const seasons = await mediaServer.getChildrenMetadata(mediaServerId);
+      for (const season of seasons ?? []) {
+        const episodes = await mediaServer.getChildrenMetadata(season.id);
+        episodeIds.push(...(episodes ?? []).map((e) => e.id));
+      }
+    }
+
+    if (episodeIds.length === 0) {
+      return [];
+    }
+
+    // intersect the viewers of every episode
+    let qualified: Set<string> | undefined;
+    for (const episodeId of episodeIds) {
+      const history = await mediaServer.getWatchHistory(episodeId);
+      const viewers = new Set(
+        (history ?? []).map((r) => r.userId).filter(Boolean),
+      );
+
+      qualified =
+        qualified === undefined
+          ? viewers
+          : new Set([...qualified].filter((u) => viewers.has(u)));
+
+      if (qualified.size === 0) {
+        return [];
+      }
+    }
+
+    return [...(qualified ?? [])];
   }
 }
