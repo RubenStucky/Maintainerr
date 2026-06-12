@@ -60,6 +60,8 @@ export class TautulliGetterService {
         id: libItem.id,
         parentId: libItem.parentId,
         grandparentId: libItem.grandparentId,
+        index: libItem.index,
+        parentIndex: libItem.parentIndex,
       });
 
       switch (prop.name) {

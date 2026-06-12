@@ -86,6 +86,8 @@ export class JellyfinGetterService {
         id: libItem.id,
         parentId: libItem.parentId ?? metadata.parentId,
         grandparentId: libItem.grandparentId ?? metadata.grandparentId,
+        index: libItem.index ?? metadata.index,
+        parentIndex: libItem.parentIndex ?? metadata.parentIndex,
       });
 
       // Get parent/grandparent metadata lazily (like Plex getter)

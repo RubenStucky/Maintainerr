@@ -32,6 +32,14 @@ export class RuleActionCompletion {
   @Column({ nullable: true })
   parent: string;
 
+  // Stable identifiers that survive delete + re-download (which changes the
+  // media server ids): the show's TMDb id and the season number.
+  @Column({ nullable: true })
+  tmdbId: number;
+
+  @Column({ nullable: true })
+  seasonIndex: number;
+
   @Column({ nullable: true })
   type: MediaItemType | undefined;
 

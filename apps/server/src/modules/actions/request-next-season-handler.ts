@@ -79,18 +79,6 @@ export class RequestNextSeasonHandler {
       where: { collectionId: collection.id },
     });
     const excludeHandled = ruleGroup?.excludeHandledUsers ?? false;
-    const handledUserIds = new Set<string>(
-      excludeHandled
-        ? (
-            await this.ruleActionCompletionRepo.find({
-              where: {
-                ruleGroupId: ruleGroup.id,
-                mediaServerId: media.mediaServerId,
-              },
-            })
-          ).map((c) => c.userId)
-        : [],
-    );
 
     // Step 2: Resolve TMDb ID for the show
     let tmdbId = media.tmdbId;
@@ -107,6 +95,48 @@ export class RequestNextSeasonHandler {
         `Could not resolve TMDb ID for media server id ${media.mediaServerId}. Skipping request.`,
       );
       return;
+    }
+
+    // Load the completions that apply to this season — matched by the
+    // current media server id, or by the stable show tmdbId + season number
+    // so exclusions survive the season being deleted and re-downloaded
+    // (which changes the media server ids).
+    const handledUserIds = new Set<string>();
+    if (excludeHandled) {
+      const completions = await this.ruleActionCompletionRepo.find({
+        where: [
+          { ruleGroupId: ruleGroup.id, mediaServerId: media.mediaServerId },
+          {
+            ruleGroupId: ruleGroup.id,
+            tmdbId: tmdbId,
+            seasonIndex: currentSeasonNumber,
+          },
+        ],
+      });
+
+      const currentKeyUserIds = new Set<string>(
+        completions
+          .filter((c) => c.mediaServerId === media.mediaServerId)
+          .map((c) => c.userId),
+      );
+
+      for (const completion of completions) {
+        handledUserIds.add(completion.userId);
+
+        // Completion only matched via tmdbId + season number: the season was
+        // re-added under a new media server id. Re-key it to the current id
+        // so rule-evaluation stat filtering picks it up again.
+        if (!currentKeyUserIds.has(completion.userId)) {
+          currentKeyUserIds.add(completion.userId);
+          await this.ruleActionCompletionRepo.update(completion.id, {
+            mediaServerId: media.mediaServerId,
+            parent: mediaData.parentId ?? completion.parent,
+          });
+          this.logger.log(
+            `Re-keyed rule completion of user '${completion.username ?? completion.userId}' to re-added media item ${media.mediaServerId}`,
+          );
+        }
+      }
     }
 
     // Step 3: Check if a next season exists on TMDb (safety net — prefer sw_nextSeasonExists rule constant)
@@ -149,6 +179,8 @@ export class RequestNextSeasonHandler {
           collection,
           media,
           mediaData.parentId,
+          tmdbId,
+          currentSeasonNumber,
           handledUserIds,
         );
       }
@@ -194,6 +226,8 @@ export class RequestNextSeasonHandler {
               collection,
               media,
               showId,
+              tmdbId,
+              currentSeasonNumber,
               handledUserIds,
             );
           }
@@ -247,6 +281,8 @@ export class RequestNextSeasonHandler {
                 collection,
                 media,
                 showId,
+                tmdbId,
+                currentSeasonNumber,
                 watcher,
                 handledUserIds,
               );
@@ -322,6 +358,8 @@ export class RequestNextSeasonHandler {
             collection,
             media,
             showId,
+            tmdbId,
+            currentSeasonNumber,
             watcher,
             handledUserIds,
           );
@@ -346,6 +384,8 @@ export class RequestNextSeasonHandler {
     collection: Collection,
     media: CollectionMedia,
     showId: string | undefined,
+    tmdbId: number,
+    seasonIndex: number,
     handledUserIds: Set<string>,
   ): Promise<void> {
     const watchers = await this.getWatcherProgressForSeason(
@@ -359,6 +399,8 @@ export class RequestNextSeasonHandler {
         collection,
         media,
         showId,
+        tmdbId,
+        seasonIndex,
         watcher,
         handledUserIds,
       );
@@ -375,6 +417,8 @@ export class RequestNextSeasonHandler {
     collection: Collection,
     media: CollectionMedia,
     showId: string | undefined,
+    tmdbId: number,
+    seasonIndex: number,
     watcher: { userId: string; username: string },
     handledUserIds: Set<string>,
   ): Promise<void> {
@@ -389,6 +433,8 @@ export class RequestNextSeasonHandler {
         username: watcher.username,
         mediaServerId: media.mediaServerId,
         parent: showId,
+        tmdbId,
+        seasonIndex,
         type: collection.type,
       });
       handledUserIds.add(watcher.userId);
