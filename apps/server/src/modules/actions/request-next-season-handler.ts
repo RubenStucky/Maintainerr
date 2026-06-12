@@ -72,6 +72,26 @@ export class RequestNextSeasonHandler {
     const currentSeasonNumber = mediaData.index;
     const nextSeasonNumber = currentSeasonNumber + 1;
 
+    // When the rule group opts in, skip users this rule already successfully
+    // ran for on this media item, and record new completions so their stats
+    // are excluded from future rule evaluations.
+    const ruleGroup = await this.ruleGroupRepo.findOne({
+      where: { collectionId: collection.id },
+    });
+    const excludeHandled = ruleGroup?.excludeHandledUsers ?? false;
+    const handledUserIds = new Set<string>(
+      excludeHandled
+        ? (
+            await this.ruleActionCompletionRepo.find({
+              where: {
+                ruleGroupId: ruleGroup.id,
+                mediaServerId: media.mediaServerId,
+              },
+            })
+          ).map((c) => c.userId)
+        : [],
+    );
+
     // Step 2: Resolve TMDb ID for the show
     let tmdbId = media.tmdbId;
     if (!tmdbId && mediaData.parentId) {
@@ -119,6 +139,19 @@ export class RequestNextSeasonHandler {
       this.logger.log(
         `Season ${nextSeasonNumber} of '${tmdbShow.name}' is already requested in Seerr. Skipping. Consider using the 'Next season already requested in Seerr' rule constant to prevent items from entering the collection.`,
       );
+
+      // The action's goal is already achieved for the current watchers:
+      // record completions so their stats are excluded from future runs.
+      if (excludeHandled) {
+        await this.recordCompletionsForAllWatchers(
+          mediaServer,
+          ruleGroup.id,
+          collection,
+          media,
+          mediaData.parentId,
+          handledUserIds,
+        );
+      }
       return;
     }
 
@@ -127,26 +160,6 @@ export class RequestNextSeasonHandler {
     // (i.e. closest to needing the next season), then map to a Seerr user ID.
     // Skip any user who has already watched (part of) the next season.
     let seerrUserId: number | undefined;
-
-    // When the rule group opts in, skip users this rule already successfully
-    // ran for on this media item, and record new completions so their stats
-    // are excluded from future rule evaluations.
-    const ruleGroup = await this.ruleGroupRepo.findOne({
-      where: { collectionId: collection.id },
-    });
-    const excludeHandled = ruleGroup?.excludeHandledUsers ?? false;
-    const handledUserIds = new Set<string>(
-      excludeHandled
-        ? (
-            await this.ruleActionCompletionRepo.find({
-              where: {
-                ruleGroupId: ruleGroup.id,
-                mediaServerId: media.mediaServerId,
-              },
-            })
-          ).map((c) => c.userId)
-        : [],
-    );
 
     // Resolve the next season's media server ID so we can check watch history
     const showId = mediaData.parentId;
@@ -171,6 +184,19 @@ export class RequestNextSeasonHandler {
               `(indices: ${showSeasons.map((s) => s.index).join(', ')}). ` +
               `It was likely already downloaded, watched, and deleted. Skipping request.`,
           );
+
+          // The watchers are already past the next season: record completions
+          // so their stats are excluded from future runs.
+          if (excludeHandled) {
+            await this.recordCompletionsForAllWatchers(
+              mediaServer,
+              ruleGroup.id,
+              collection,
+              media,
+              showId,
+              handledUserIds,
+            );
+          }
           return;
         }
       }
@@ -304,6 +330,37 @@ export class RequestNextSeasonHandler {
     } else {
       this.logger.warn(
         `[Seerr] Failed to request season ${nextSeasonNumber} of '${tmdbShow.name}' (tmdbId: ${tmdbId})`,
+      );
+    }
+  }
+
+  /**
+   * Record completions for every current watcher of the season. Used when
+   * the action's goal is already achieved (next season already requested,
+   * or already watched and cleaned up), so the watchers' stats are excluded
+   * from future rule evaluations.
+   */
+  private async recordCompletionsForAllWatchers(
+    mediaServer: Awaited<ReturnType<MediaServerFactory['getService']>>,
+    ruleGroupId: number,
+    collection: Collection,
+    media: CollectionMedia,
+    showId: string | undefined,
+    handledUserIds: Set<string>,
+  ): Promise<void> {
+    const watchers = await this.getWatcherProgressForSeason(
+      mediaServer,
+      media.mediaServerId,
+    );
+
+    for (const watcher of watchers) {
+      await this.recordCompletion(
+        ruleGroupId,
+        collection,
+        media,
+        showId,
+        watcher,
+        handledUserIds,
       );
     }
   }
