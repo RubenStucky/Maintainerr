@@ -40,6 +40,7 @@ import { Exclusion } from './entities/exclusion.entities';
 import { RuleActionCompletion } from './entities/rule-action-completion.entities';
 import { RuleGroup } from './entities/rule-group.entities';
 import { Rules } from './entities/rules.entities';
+import { getHandledCompletionsForItem } from './helpers/handled-user-filter.helper';
 import { RuleComparatorServiceFactory } from './helpers/rule.comparator.service';
 import { RuleYamlService } from './helpers/yaml.service';
 
@@ -1357,10 +1358,21 @@ export class RulesService {
       group.rules = await this.getRules(group.id);
 
       const groupDto = group as RulesDto;
+      let excludedUsers: string[] | undefined;
       if (group.excludeHandledUsers) {
         groupDto.handledUserCompletions = await this.getRuleActionCompletions(
           group.id,
         );
+
+        excludedUsers = [
+          ...new Set(
+            getHandledCompletionsForItem(groupDto, {
+              id: mediaResp.id,
+              parentId: mediaResp.parentId,
+              grandparentId: mediaResp.grandparentId,
+            }).map((c) => c.username || c.userId),
+          ),
+        ];
       }
 
       const ruleComparator = this.ruleComparatorServiceFactory.create();
@@ -1369,7 +1381,7 @@ export class RulesService {
       ]);
 
       if (result) {
-        return { code: 1, result: result.stats };
+        return { code: 1, result: result.stats, excludedUsers };
       } else {
         return { code: 0, result: 'An error occurred executing rules' };
       }

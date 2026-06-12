@@ -1,4 +1,5 @@
 import { RulesDto } from '../dtos/rules.dto';
+import { RuleActionCompletion } from '../entities/rule-action-completion.entities';
 
 /**
  * Resolved set of users whose stats must be excluded for a specific media
@@ -18,29 +19,38 @@ interface ItemRef {
 }
 
 /**
- * Build the handled-user filter for a media item from the completions
- * preloaded on the rule group DTO. Returns undefined when the feature is
- * disabled or no completion applies to this item, so callers can skip
- * filtering entirely.
- *
- * A completion applies to the exact media item it was recorded for and to
- * that item's children (e.g. episodes of a handled season).
+ * Return the completions (preloaded on the rule group DTO) that apply to a
+ * media item. A completion applies to the exact media item it was recorded
+ * for and to that item's children (e.g. episodes of a handled season).
  */
-export function getHandledUserFilter(
+export function getHandledCompletionsForItem(
   ruleGroup: RulesDto | undefined,
   item: ItemRef,
-): HandledUserFilter | undefined {
-  if (!ruleGroup?.excludeHandledUsers) return undefined;
+): RuleActionCompletion[] {
+  if (!ruleGroup?.excludeHandledUsers) return [];
 
   const completions = ruleGroup.handledUserCompletions;
-  if (!completions?.length) return undefined;
+  if (!completions?.length) return [];
 
-  const relevant = completions.filter(
+  return completions.filter(
     (c) =>
       c.mediaServerId === item.id ||
       (item.parentId && c.mediaServerId === item.parentId) ||
       (item.grandparentId && c.mediaServerId === item.grandparentId),
   );
+}
+
+/**
+ * Build the handled-user filter for a media item from the completions
+ * preloaded on the rule group DTO. Returns undefined when the feature is
+ * disabled or no completion applies to this item, so callers can skip
+ * filtering entirely.
+ */
+export function getHandledUserFilter(
+  ruleGroup: RulesDto | undefined,
+  item: ItemRef,
+): HandledUserFilter | undefined {
+  const relevant = getHandledCompletionsForItem(ruleGroup, item);
 
   if (!relevant.length) return undefined;
 
