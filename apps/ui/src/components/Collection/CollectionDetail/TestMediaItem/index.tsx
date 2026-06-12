@@ -24,6 +24,9 @@ interface IOptions {
 interface IComparisonResult {
   code: 1 | 0
   result: any
+  // users excluded for this media item because the rule's action already ran
+  // for them (only present when the rule group has the feature enabled)
+  excludedUsers?: string[]
 }
 
 const emptyOption: IOptions = {
@@ -301,7 +304,16 @@ const TestMediaItem = (props: ITestMediaItem) => {
               defaultLanguage="yaml"
               theme="vs-dark"
               value={
-                comparisonResult ? YAML.stringify(comparisonResult.result) : ''
+                comparisonResult
+                  ? YAML.stringify(
+                      comparisonResult.excludedUsers !== undefined
+                        ? {
+                            excludedUsers: comparisonResult.excludedUsers,
+                            result: comparisonResult.result,
+                          }
+                        : comparisonResult.result,
+                    )
+                  : ''
               }
               onMount={handleEditorDidMount}
             />
