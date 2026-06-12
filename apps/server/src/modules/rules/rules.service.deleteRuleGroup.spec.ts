@@ -20,6 +20,7 @@ describe('RulesService.updateRules - null guard', () => {
       {} as any, // collectionMediaRepository
       {} as any, // communityRuleKarmaRepository
       {} as any, // exclusionRepo
+      {} as any, // ruleActionCompletionRepo
       {} as any, // settingsRepo
       {} as any, // radarrSettingsRepo
       {} as any, // sonarrSettingsRepo
@@ -67,6 +68,10 @@ describe('RulesService.deleteRuleGroup', () => {
       delete: jest.fn().mockResolvedValue(undefined),
     };
 
+    const ruleActionCompletionRepo = {
+      delete: jest.fn().mockResolvedValue(undefined),
+    };
+
     const collectionService = {
       deleteCollection: jest
         .fn()
@@ -84,6 +89,7 @@ describe('RulesService.deleteRuleGroup', () => {
       {} as any, // collectionMediaRepository
       {} as any, // communityRuleKarmaRepository
       exclusionRepo as any,
+      ruleActionCompletionRepo as any,
       {} as any, // settingsRepo
       {} as any, // radarrSettingsRepo
       {} as any, // sonarrSettingsRepo
@@ -101,6 +107,7 @@ describe('RulesService.deleteRuleGroup', () => {
       service,
       ruleGroupRepository,
       exclusionRepo,
+      ruleActionCompletionRepo,
       collectionService,
       eventEmitter,
     };
@@ -215,14 +222,21 @@ describe('RulesService.deleteRuleGroup', () => {
 
     it('cleans up exclusions and ruleGroup rows', async () => {
       const group = { id: 42, collectionId: null };
-      const { service, exclusionRepo, ruleGroupRepository } =
-        createRulesService({
-          group,
-        });
+      const {
+        service,
+        exclusionRepo,
+        ruleActionCompletionRepo,
+        ruleGroupRepository,
+      } = createRulesService({
+        group,
+      });
 
       await service.deleteRuleGroup(42);
 
       expect(exclusionRepo.delete).toHaveBeenCalledWith({ ruleGroupId: 42 });
+      expect(ruleActionCompletionRepo.delete).toHaveBeenCalledWith({
+        ruleGroupId: 42,
+      });
       expect(ruleGroupRepository.delete).toHaveBeenCalledWith(42);
     });
   });

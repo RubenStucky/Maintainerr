@@ -36,6 +36,7 @@ export interface IRuleGroup {
   notifications?: AgentConfiguration[]
   collection?: ICollection
   ruleHandlerCronSchedule?: string | null
+  excludeHandledUsers?: boolean
 }
 
 const RuleGroup = (props: {

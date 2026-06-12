@@ -43,6 +43,9 @@ export class RuleGroup {
   @Column({ nullable: true, default: null })
   ruleHandlerCronSchedule: string | null;
 
+  @Column({ nullable: false, default: false })
+  excludeHandledUsers: boolean;
+
   @OneToMany(() => Rules, (rules) => rules.ruleGroup, {
     onDelete: 'CASCADE',
   })

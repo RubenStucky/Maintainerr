@@ -1,6 +1,7 @@
 import { MediaItemType } from '@maintainerr/contracts';
 import { ICollection } from '../../collections/interfaces/collection.interface';
 import { Notification } from '../../notifications/entities/notification.entities';
+import { RuleActionCompletion } from '../entities/rule-action-completion.entities';
 import { RuleDto } from './rule.dto';
 import { RuleDbDto } from './ruleDb.dto';
 
@@ -13,6 +14,9 @@ export class RulesDto {
   arrAction?: number;
   useRules?: boolean;
   ruleHandlerCronSchedule?: string | null;
+  excludeHandledUsers?: boolean;
+  // Transient: completions preloaded for execution, not part of the API payload
+  handledUserCompletions?: RuleActionCompletion[];
   collection?: ICollection;
   listExclusions?: boolean;
   forceSeerr?: boolean;

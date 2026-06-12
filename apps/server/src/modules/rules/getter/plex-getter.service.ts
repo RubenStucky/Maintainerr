@@ -18,6 +18,10 @@ import {
 } from '../constants/rules.constants';
 import { RulesDto } from '../dtos/rules.dto';
 import { buildCollectionExcludeNames } from '../helpers/collection-exclude.helper';
+import {
+  getHandledUserFilter,
+  isHandledUser,
+} from '../helpers/handled-user-filter.helper';
 
 @Injectable()
 export class PlexGetterService {
@@ -50,6 +54,14 @@ export class PlexGetterService {
         libItem.id,
         this.metadataRequestOptions,
       );
+
+      // users whose stats are excluded because the rule's action already ran
+      // for them on this media item (see RuleGroup.excludeHandledUsers)
+      const handledFilter = getHandledUserFilter(ruleGroup, {
+        id: libItem.id,
+        parentId: libItem.parentId ?? metadata?.parentRatingKey,
+        grandparentId: libItem.grandparentId ?? metadata?.grandparentRatingKey,
+      });
 
       // Parent/grandparent metadata is only needed for some properties.
       // Lazy-load and memoize so we don't fetch unless a case uses it.
@@ -89,6 +101,9 @@ export class PlexGetterService {
             const viewerIds = viewers.map((el) => +el.accountID);
             return plexUsers
               .filter((el) => viewerIds.includes(el.plexId))
+              .filter(
+                (el) => !isHandledUser(handledFilter, el.plexId, el.username),
+              )
               .map((el) => el.username);
           } else {
             return [];
@@ -113,7 +128,11 @@ export class PlexGetterService {
         }
         case 'viewCount': {
           const count = await this.plexApi.getWatchHistory(metadata.ratingKey);
-          return count ? count.length : 0;
+          return count
+            ? count.filter(
+                (el) => !isHandledUser(handledFilter, el.accountID),
+              ).length
+            : 0;
         }
         case 'labels': {
           const item =
@@ -237,9 +256,12 @@ export class PlexGetterService {
           return await this.plexApi
             .getWatchHistory(metadata.ratingKey)
             .then((seenby) => {
-              if (seenby.length > 0) {
+              const views = seenby.filter(
+                (el) => !isHandledUser(handledFilter, el.accountID),
+              );
+              if (views.length > 0) {
                 return new Date(
-                  +seenby
+                  +views
                     .map((el) => el.viewedAt)
                     .sort()
                     .reverse()[0] * 1000,
@@ -312,6 +334,9 @@ export class PlexGetterService {
             const viewerIds = allViewers.map((el) => +el.plexId);
             return plexUsers
               .filter((el) => viewerIds.includes(el.plexId))
+              .filter(
+                (el) => !isHandledUser(handledFilter, el.plexId, el.username),
+              )
               .map((el) => el.username);
           }
 
@@ -332,14 +357,20 @@ export class PlexGetterService {
           if (uniqueViewers && uniqueViewers.length > 0) {
             return plexUsers
               .filter((el) => uniqueViewers.includes(+el.plexId))
+              .filter(
+                (el) => !isHandledUser(handledFilter, el.plexId, el.username),
+              )
               .map((el) => el.username);
           }
           return [];
         }
         case 'sw_lastWatched': {
-          let watchHistory = await this.plexApi.getWatchHistory(
-            metadata.ratingKey,
-          );
+          let watchHistory = (
+            await this.plexApi.getWatchHistory(metadata.ratingKey)
+          )?.filter((el) => !isHandledUser(handledFilter, el.accountID));
+          if (watchHistory?.length === 0) {
+            watchHistory = undefined;
+          }
           watchHistory?.sort((a, b) => a.parentIndex - b.parentIndex).reverse();
           watchHistory = watchHistory?.filter(
             (el) => el.parentIndex === watchHistory[0].parentIndex,
@@ -373,7 +404,11 @@ export class PlexGetterService {
               const views = await this.plexApi.getWatchHistory(
                 episode.ratingKey,
               );
-              if (views?.length > 0) {
+              if (
+                views?.some(
+                  (el) => !isHandledUser(handledFilter, el.accountID),
+                )
+              ) {
                 viewCount++;
               }
             }
@@ -396,7 +431,11 @@ export class PlexGetterService {
               const views = await this.plexApi.getWatchHistory(
                 episode.ratingKey,
               );
-              if (views?.length > 0) {
+              if (
+                views?.some(
+                  (el) => !isHandledUser(handledFilter, el.accountID),
+                )
+              ) {
                 watchedEpisodes++;
               }
             }
@@ -410,9 +449,9 @@ export class PlexGetterService {
 
           // for episodes
           if (metadata.type === 'episode') {
-            const views = await this.plexApi.getWatchHistory(
-              metadata.ratingKey,
-            );
+            const views = (
+              await this.plexApi.getWatchHistory(metadata.ratingKey)
+            )?.filter((el) => !isHandledUser(handledFilter, el.accountID));
             viewCount =
               views?.length > 0 ? viewCount + views.length : viewCount;
           } else {
@@ -426,9 +465,9 @@ export class PlexGetterService {
                 season.ratingKey,
               );
               for (const episode of episodes) {
-                const views = await this.plexApi.getWatchHistory(
-                  episode.ratingKey,
-                );
+                const views = (
+                  await this.plexApi.getWatchHistory(episode.ratingKey)
+                )?.filter((el) => !isHandledUser(handledFilter, el.accountID));
                 viewCount =
                   views?.length > 0 ? viewCount + views.length : viewCount;
               }
