@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { RadarrActionHandler } from '../actions/radarr-action-handler';
 import { RequestNextSeasonHandler } from '../actions/request-next-season-handler';
+import { RuleActionCompletionRecorder } from '../actions/rule-action-completion-recorder.service';
 import { SonarrActionHandler } from '../actions/sonarr-action-handler';
 import { MediaServerFactory } from '../api/media-server/media-server.factory';
 import { IMediaServerService } from '../api/media-server/media-server.interface';
@@ -22,6 +23,7 @@ export class CollectionHandler {
     private readonly radarrActionHandler: RadarrActionHandler,
     private readonly sonarrActionHandler: SonarrActionHandler,
     private readonly requestNextSeasonHandler: RequestNextSeasonHandler,
+    private readonly completionRecorder: RuleActionCompletionRecorder,
     private readonly logger: MaintainerrLogger,
   ) {
     logger.setContext(CollectionHandler.name);
@@ -64,11 +66,20 @@ export class CollectionHandler {
 
     await this.collectionService.saveCollection(collection);
 
-    // Request next season: delegates to Seerr, skip *arr deletion logic
+    // Request next season: delegates to Seerr, skip *arr deletion logic.
+    // It does its own, more fine-grained, rule completion recording.
     if (collection.arrAction === ServarrAction.REQUEST_NEXT_SEASON) {
       await this.requestNextSeasonHandler.handleAction(collection, media);
       return;
     }
+
+    // Record rule completions for the media's watchers BEFORE the action
+    // deletes it from the media server (when the rule group opts in), so the
+    // rule doesn't re-trigger for them if the media gets re-added later.
+    await this.completionRecorder.recordCompletionsForWatchers(
+      collection,
+      media,
+    );
 
     if (library?.type === 'movie' && collection.radarrSettingsId) {
       await this.radarrActionHandler.handleAction(collection, media);
