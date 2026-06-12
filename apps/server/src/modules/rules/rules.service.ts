@@ -37,6 +37,7 @@ import { RuleDbDto } from './dtos/ruleDb.dto';
 import { RulesDto } from './dtos/rules.dto';
 import { CommunityRuleKarma } from './entities/community-rule-karma.entities';
 import { Exclusion } from './entities/exclusion.entities';
+import { RuleActionCompletion } from './entities/rule-action-completion.entities';
 import { RuleGroup } from './entities/rule-group.entities';
 import { Rules } from './entities/rules.entities';
 import { RuleComparatorServiceFactory } from './helpers/rule.comparator.service';
@@ -64,6 +65,8 @@ export class RulesService {
     private readonly communityRuleKarmaRepository: Repository<CommunityRuleKarma>,
     @InjectRepository(Exclusion)
     private readonly exclusionRepo: Repository<Exclusion>,
+    @InjectRepository(RuleActionCompletion)
+    private readonly ruleActionCompletionRepo: Repository<RuleActionCompletion>,
     @InjectRepository(Settings)
     private readonly settingsRepo: Repository<Settings>,
     @InjectRepository(RadarrSettings)
@@ -282,6 +285,7 @@ export class RulesService {
       }
 
       await this.exclusionRepo.delete({ ruleGroupId: ruleGroupId });
+      await this.ruleActionCompletionRepo.delete({ ruleGroupId: ruleGroupId });
       await this.ruleGroupRepository.delete(ruleGroupId);
 
       if (group) {
@@ -373,6 +377,7 @@ export class RulesService {
         undefined,
         params.notifications,
         params.ruleHandlerCronSchedule,
+        params.excludeHandledUsers ?? false,
       );
 
       if (params.useRules) {
@@ -476,6 +481,9 @@ export class RulesService {
           );
 
           await this.exclusionRepo.delete({ ruleGroupId: params.id });
+          await this.ruleActionCompletionRepo.delete({
+            ruleGroupId: params.id,
+          });
         }
 
         // update or create the collection
@@ -545,6 +553,7 @@ export class RulesService {
           group.id,
           params.notifications,
           params.ruleHandlerCronSchedule,
+          params.excludeHandledUsers ?? false,
         );
 
         // remove previous rules
@@ -864,6 +873,20 @@ export class RulesService {
     }
   }
 
+  async getRuleActionCompletions(
+    ruleGroupId: number,
+  ): Promise<RuleActionCompletion[]> {
+    try {
+      return await this.ruleActionCompletionRepo.find({
+        where: { ruleGroupId },
+      });
+    } catch (error) {
+      this.logger.warn('Rules - Action failed');
+      this.logger.debug(error);
+      return [];
+    }
+  }
+
   private validateRule(rule: RuleDto): ReturnStatus {
     try {
       const val1: Property = this.ruleConstants.applications
@@ -1037,6 +1060,7 @@ export class RulesService {
     id?: number,
     notifications?: Notification[],
     ruleHandlerCronSchedule?: string | null,
+    excludeHandledUsers = false,
   ): Promise<number> {
     try {
       const values = {
@@ -1048,6 +1072,7 @@ export class RulesService {
         useRules: useRules,
         dataType: dataType,
         ruleHandlerCronSchedule: ruleHandlerCronSchedule,
+        excludeHandledUsers: excludeHandledUsers,
       };
       const connection = this.connection.createQueryBuilder();
 
@@ -1330,11 +1355,18 @@ export class RulesService {
 
     if (mediaResp) {
       group.rules = await this.getRules(group.id);
+
+      const groupDto = group as RulesDto;
+      if (group.excludeHandledUsers) {
+        groupDto.handledUserCompletions = await this.getRuleActionCompletions(
+          group.id,
+        );
+      }
+
       const ruleComparator = this.ruleComparatorServiceFactory.create();
-      const result = await ruleComparator.executeRulesWithData(
-        group as RulesDto,
-        [mediaResp],
-      );
+      const result = await ruleComparator.executeRulesWithData(groupDto, [
+        mediaResp,
+      ]);
 
       if (result) {
         return { code: 1, result: result.stats };

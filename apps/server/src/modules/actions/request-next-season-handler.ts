@@ -1,4 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { MediaServerFactory } from '../api/media-server/media-server.factory';
 import { SeerrApiService } from '../api/seerr-api/seerr-api.service';
 import { TmdbIdService } from '../api/tmdb-api/tmdb-id.service';
@@ -6,6 +8,8 @@ import { TmdbApiService } from '../api/tmdb-api/tmdb.service';
 import { Collection } from '../collections/entities/collection.entities';
 import { CollectionMedia } from '../collections/entities/collection_media.entities';
 import { MaintainerrLogger } from '../logging/logs.service';
+import { RuleActionCompletion } from '../rules/entities/rule-action-completion.entities';
+import { RuleGroup } from '../rules/entities/rule-group.entities';
 import { SettingsService } from '../settings/settings.service';
 
 @Injectable()
@@ -16,6 +20,10 @@ export class RequestNextSeasonHandler {
     private readonly tmdbIdService: TmdbIdService,
     private readonly mediaServerFactory: MediaServerFactory,
     private readonly settings: SettingsService,
+    @InjectRepository(RuleGroup)
+    private readonly ruleGroupRepo: Repository<RuleGroup>,
+    @InjectRepository(RuleActionCompletion)
+    private readonly ruleActionCompletionRepo: Repository<RuleActionCompletion>,
     private readonly logger: MaintainerrLogger,
   ) {
     logger.setContext(RequestNextSeasonHandler.name);
@@ -120,6 +128,26 @@ export class RequestNextSeasonHandler {
     // Skip any user who has already watched (part of) the next season.
     let seerrUserId: number | undefined;
 
+    // When the rule group opts in, skip users this rule already successfully
+    // ran for on this media item, and record new completions so their stats
+    // are excluded from future rule evaluations.
+    const ruleGroup = await this.ruleGroupRepo.findOne({
+      where: { collectionId: collection.id },
+    });
+    const excludeHandled = ruleGroup?.excludeHandledUsers ?? false;
+    const handledUserIds = new Set<string>(
+      excludeHandled
+        ? (
+            await this.ruleActionCompletionRepo.find({
+              where: {
+                ruleGroupId: ruleGroup.id,
+                mediaServerId: media.mediaServerId,
+              },
+            })
+          ).map((c) => c.userId)
+        : [],
+    );
+
     // Resolve the next season's media server ID so we can check watch history
     const showId = mediaData.parentId;
     let nextSeasonMediaServerId: string | undefined;
@@ -158,9 +186,18 @@ export class RequestNextSeasonHandler {
       watcherProgress.sort((a, b) => b.episodesWatched - a.episodesWatched);
 
       let skippedDueToWatched = 0;
-
+      let skippedDueToHandled = 0;
 
       for (const watcher of watcherProgress) {
+        // Skip users this rule already successfully ran for on this media item
+        if (handledUserIds.has(watcher.userId)) {
+          this.logger.log(
+            `Skipping user '${watcher.username}' (id: ${watcher.userId}) — this rule already ran for them on this media item`,
+          );
+          skippedDueToHandled++;
+          continue;
+        }
+
         // Check if this user has already watched part of the next season
         if (nextSeasonMediaServerId) {
           const hasWatchedNextSeason =
@@ -175,6 +212,19 @@ export class RequestNextSeasonHandler {
               `Skipping user '${watcher.username}' (id: ${watcher.userId}) — already watched (part of) season ${nextSeasonNumber}`,
             );
             skippedDueToWatched++;
+
+            // They're past this season already — record the completion so
+            // their stats are excluded from future runs of this rule.
+            if (excludeHandled) {
+              await this.recordCompletion(
+                ruleGroup.id,
+                collection,
+                media,
+                showId,
+                watcher,
+                handledUserIds,
+              );
+            }
             continue;
           }
         }
@@ -195,10 +245,14 @@ export class RequestNextSeasonHandler {
         }
       }
 
-      // If ALL watchers have already seen the next season, skip entirely
-      if (skippedDueToWatched === watcherProgress.length) {
+      // If ALL watchers have already seen the next season or were already
+      // handled by this rule, skip entirely
+      if (
+        skippedDueToWatched + skippedDueToHandled ===
+        watcherProgress.length
+      ) {
         this.logger.log(
-          `All ${watcherProgress.length} watcher(s) of season ${currentSeasonNumber} of '${tmdbShow.name}' have already watched (part of) season ${nextSeasonNumber}. Skipping request.`,
+          `All ${watcherProgress.length} watcher(s) of season ${currentSeasonNumber} of '${tmdbShow.name}' have already watched (part of) season ${nextSeasonNumber} or were already handled by this rule. Skipping request.`,
         );
         return;
       }
@@ -232,10 +286,63 @@ export class RequestNextSeasonHandler {
         `[Seerr] Requested season ${nextSeasonNumber} of '${tmdbShow.name}' (tmdbId: ${tmdbId})` +
           (seerrUserId ? ` on behalf of Seerr user ${seerrUserId}` : ''),
       );
+
+      // The action ran successfully for every current watcher of this season:
+      // record completions so their stats are excluded from future runs.
+      if (excludeHandled) {
+        for (const watcher of watcherProgress) {
+          await this.recordCompletion(
+            ruleGroup.id,
+            collection,
+            media,
+            showId,
+            watcher,
+            handledUserIds,
+          );
+        }
+      }
     } else {
       this.logger.warn(
         `[Seerr] Failed to request season ${nextSeasonNumber} of '${tmdbShow.name}' (tmdbId: ${tmdbId})`,
       );
+    }
+  }
+
+  /**
+   * Record that this rule successfully ran for a (user, media item)
+   * combination, so the user's stats are excluded from future rule
+   * evaluations and the user is skipped by this handler.
+   */
+  private async recordCompletion(
+    ruleGroupId: number,
+    collection: Collection,
+    media: CollectionMedia,
+    showId: string | undefined,
+    watcher: { userId: string; username: string },
+    handledUserIds: Set<string>,
+  ): Promise<void> {
+    if (handledUserIds.has(watcher.userId)) {
+      return;
+    }
+
+    try {
+      await this.ruleActionCompletionRepo.save({
+        ruleGroupId,
+        userId: watcher.userId,
+        username: watcher.username,
+        mediaServerId: media.mediaServerId,
+        parent: showId,
+        type: collection.type,
+      });
+      handledUserIds.add(watcher.userId);
+      this.logger.log(
+        `Recorded rule completion for user '${watcher.username}' on media item ${media.mediaServerId}`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to record rule completion for user '${watcher.username}' on media item ${media.mediaServerId}`,
+      );
+      this.logger.debug(error);
     }
   }
 

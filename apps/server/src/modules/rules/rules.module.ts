@@ -16,6 +16,7 @@ import { TasksModule } from '../tasks/tasks.module';
 import { RuleConstanstService } from './constants/constants.service';
 import { CommunityRuleKarma } from './entities/community-rule-karma.entities';
 import { Exclusion } from './entities/exclusion.entities';
+import { RuleActionCompletion } from './entities/rule-action-completion.entities';
 import { RuleGroup } from './entities/rule-group.entities';
 import { Rules } from './entities/rules.entities';
 import { ValueGetterService } from './getter/getter.service';
@@ -50,6 +51,7 @@ import { RuleMaintenanceService } from './tasks/rule-maintenance.service';
       Collection,
       CollectionMedia,
       Exclusion,
+      RuleActionCompletion,
       CommunityRuleKarma,
       Settings,
       RadarrSettings,

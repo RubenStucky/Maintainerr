@@ -172,6 +172,7 @@ const ruleGroupFormSchema = z
     sortTitle: z.string().optional(),
     active: z.boolean(),
     useRules: z.boolean(),
+    excludeHandledUsers: z.boolean(),
     radarrSettingsId: z.number().int().nullable().optional(),
     sonarrSettingsId: z.number().int().nullable().optional(),
     ruleHandlerCronSchedule: z.preprocess(
@@ -248,6 +249,7 @@ const buildFormDefaults = (editData?: IRuleGroup): RuleGroupFormValues => ({
   sortTitle: editData?.collection?.sortTitle ?? '',
   active: editData?.isActive ?? true,
   useRules: editData?.useRules ?? true,
+  excludeHandledUsers: editData?.excludeHandledUsers ?? false,
   radarrSettingsId: editData
     ? (editData.collection?.radarrSettingsId ?? null)
     : undefined,
@@ -536,6 +538,7 @@ const AddModal = (props: AddModal) => {
       rules: data.useRules ? rules : [],
       notifications: configuredNotificationConfigurations,
       ruleHandlerCronSchedule: data.ruleHandlerCronSchedule,
+      excludeHandledUsers: data.excludeHandledUsers,
     }
 
     try {
@@ -1039,6 +1042,30 @@ const AddModal = (props: AddModal) => {
                             id="use_rules"
                             className="border-zinc-600 hover:border-zinc-500 focus:border-zinc-500 focus:bg-opacity-100 focus:placeholder-zinc-400 focus:outline-none focus:ring-0"
                             {...register('useRules')}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-row items-center justify-between py-4">
+                      <label
+                        htmlFor="exclude_handled_users"
+                        className="text-label"
+                      >
+                        Exclude already-handled users
+                        <p className="text-xs font-normal">
+                          Once this rule&apos;s action has successfully run for
+                          a user and media item combination, exclude that
+                          user&apos;s stats (seen by, watchers, views, ...)
+                          from future runs
+                        </p>
+                      </label>
+                      <div className="form-input">
+                        <div className="form-input-field">
+                          <input
+                            type="checkbox"
+                            id="exclude_handled_users"
+                            className="border-zinc-600 hover:border-zinc-500 focus:border-zinc-500 focus:bg-opacity-100 focus:placeholder-zinc-400 focus:outline-none focus:ring-0"
+                            {...register('excludeHandledUsers')}
                           />
                         </div>
                       </div>

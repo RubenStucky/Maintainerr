@@ -15,6 +15,11 @@ import {
 } from '../constants/rules.constants';
 import { RulesDto } from '../dtos/rules.dto';
 import { buildCollectionExcludeNames } from '../helpers/collection-exclude.helper';
+import {
+  getHandledUserFilter,
+  HandledUserFilter,
+  isHandledUser,
+} from '../helpers/handled-user-filter.helper';
 
 /**
  * Jellyfin Getter Service
@@ -75,6 +80,14 @@ export class JellyfinGetterService {
         return null;
       }
 
+      // users whose stats are excluded because the rule's action already ran
+      // for them on this media item (see RuleGroup.excludeHandledUsers)
+      const handledFilter = getHandledUserFilter(ruleGroup, {
+        id: libItem.id,
+        parentId: libItem.parentId ?? metadata.parentId,
+        grandparentId: libItem.grandparentId ?? metadata.grandparentId,
+      });
+
       // Get parent/grandparent metadata lazily (like Plex getter)
       let parentPromise: Promise<typeof metadata | undefined> | undefined;
       const getParent = async () => {
@@ -104,7 +117,9 @@ export class JellyfinGetterService {
           );
           const users = await this.jellyfinAdapter.getUsers();
           const userMap = new Map(users.map((u) => [u.id, u.name]));
-          return seenByUserIds.map((id) => userMap.get(id) || id);
+          return seenByUserIds
+            .filter((id) => !isHandledUser(handledFilter, id, userMap.get(id)))
+            .map((id) => userMap.get(id) || id);
         }
 
         case 'favoritedBy': {
@@ -150,7 +165,9 @@ export class JellyfinGetterService {
           const watchHistory = await this.jellyfinAdapter.getWatchHistory(
             metadata.id,
           );
-          return watchHistory.length;
+          return watchHistory.filter(
+            (r) => !isHandledUser(handledFilter, r.userId),
+          ).length;
         }
 
         case 'playCount': {
@@ -183,9 +200,10 @@ export class JellyfinGetterService {
             return await this.getLastWatchedShowDate(
               metadata.id,
               metadata.type,
+              handledFilter,
             );
           }
-          return await this.getLastViewedAt(metadata.id);
+          return await this.getLastViewedAt(metadata.id, handledFilter);
         }
 
         case 'fileVideoResolution': {
@@ -214,11 +232,19 @@ export class JellyfinGetterService {
         }
 
         case 'sw_allEpisodesSeenBy': {
-          return await this.getAllEpisodesSeenBy(metadata.id, metadata.type);
+          return await this.getAllEpisodesSeenBy(
+            metadata.id,
+            metadata.type,
+            handledFilter,
+          );
         }
 
         case 'sw_lastWatched': {
-          return await this.getLastWatchedShowDate(metadata.id, metadata.type);
+          return await this.getLastWatchedShowDate(
+            metadata.id,
+            metadata.type,
+            handledFilter,
+          );
         }
 
         case 'sw_episodes': {
@@ -226,7 +252,11 @@ export class JellyfinGetterService {
         }
 
         case 'sw_viewedEpisodes': {
-          return await this.getViewedEpisodeCount(metadata.id, metadata.type);
+          return await this.getViewedEpisodeCount(
+            metadata.id,
+            metadata.type,
+            handledFilter,
+          );
         }
 
         case 'sw_watchedPercentage': {
@@ -237,6 +267,7 @@ export class JellyfinGetterService {
           const watchedEps = await this.getViewedEpisodeCount(
             metadata.id,
             metadata.type,
+            handledFilter,
           );
           return totalEps > 0
             ? Math.round((watchedEps / totalEps) * 100)
@@ -248,7 +279,11 @@ export class JellyfinGetterService {
         }
 
         case 'sw_amountOfViews': {
-          return await this.getTotalShowViews(metadata.id, metadata.type);
+          return await this.getTotalShowViews(
+            metadata.id,
+            metadata.type,
+            handledFilter,
+          );
         }
 
         case 'sw_playCount': {
@@ -278,7 +313,7 @@ export class JellyfinGetterService {
         }
 
         case 'sw_watchers': {
-          return await this.getShowWatchers(metadata.id);
+          return await this.getShowWatchers(metadata.id, handledFilter);
         }
 
         case 'collection_names': {
@@ -448,8 +483,13 @@ export class JellyfinGetterService {
     }
   }
 
-  private async getLastViewedAt(itemId: string): Promise<Date | null> {
-    const watchHistory = await this.jellyfinAdapter.getWatchHistory(itemId);
+  private async getLastViewedAt(
+    itemId: string,
+    handledFilter?: HandledUserFilter,
+  ): Promise<Date | null> {
+    const watchHistory = (
+      await this.jellyfinAdapter.getWatchHistory(itemId)
+    ).filter((r) => !isHandledUser(handledFilter, r.userId));
     if (!watchHistory.length) {
       return null;
     }
@@ -466,6 +506,7 @@ export class JellyfinGetterService {
   private async getAllEpisodesSeenBy(
     itemId: string,
     type: MediaItemType,
+    handledFilter?: HandledUserFilter,
   ): Promise<string[]> {
     const users = await this.jellyfinAdapter.getUsers();
 
@@ -508,12 +549,15 @@ export class JellyfinGetterService {
 
     // Map to usernames
     const userMap = new Map(users.map((u) => [u.id, u.name]));
-    return usersWhoWatchedAll.map((id) => userMap.get(id) || id);
+    return usersWhoWatchedAll
+      .filter((id) => !isHandledUser(handledFilter, id, userMap.get(id)))
+      .map((id) => userMap.get(id) || id);
   }
 
   private async getLastWatchedShowDate(
     itemId: string,
     type: MediaItemType,
+    handledFilter?: HandledUserFilter,
   ): Promise<Date | null> {
     let latestDate: Date | null = null;
 
@@ -524,7 +568,10 @@ export class JellyfinGetterService {
         'episode',
       );
       for (const episode of episodes) {
-        const lastViewed = await this.getLastViewedAt(episode.id);
+        const lastViewed = await this.getLastViewedAt(
+          episode.id,
+          handledFilter,
+        );
         if (lastViewed && (!latestDate || lastViewed > latestDate)) {
           latestDate = lastViewed;
         }
@@ -541,7 +588,10 @@ export class JellyfinGetterService {
           'episode',
         );
         for (const episode of episodes) {
-          const lastViewed = await this.getLastViewedAt(episode.id);
+          const lastViewed = await this.getLastViewedAt(
+            episode.id,
+            handledFilter,
+          );
           if (lastViewed && (!latestDate || lastViewed > latestDate)) {
             latestDate = lastViewed;
           }
@@ -583,6 +633,7 @@ export class JellyfinGetterService {
   private async getViewedEpisodeCount(
     itemId: string,
     type: MediaItemType,
+    handledFilter?: HandledUserFilter,
   ): Promise<number> {
     const seasons =
       type === 'season'
@@ -597,7 +648,8 @@ export class JellyfinGetterService {
       );
       for (const episode of episodes) {
         const seenBy = await this.jellyfinAdapter.getItemSeenBy(episode.id);
-        if (seenBy.length > 0) viewedCount++;
+        if (seenBy.some((id) => !isHandledUser(handledFilter, id)))
+          viewedCount++;
       }
     }
     return viewedCount;
@@ -635,10 +687,12 @@ export class JellyfinGetterService {
   private async getTotalShowViews(
     itemId: string,
     type: MediaItemType,
+    handledFilter?: HandledUserFilter,
   ): Promise<number> {
     if (type === 'episode') {
       const history = await this.jellyfinAdapter.getWatchHistory(itemId);
-      return history.length;
+      return history.filter((r) => !isHandledUser(handledFilter, r.userId))
+        .length;
     }
 
     const seasons =
@@ -654,19 +708,26 @@ export class JellyfinGetterService {
       );
       for (const episode of episodes) {
         const history = await this.jellyfinAdapter.getWatchHistory(episode.id);
-        totalViews += history.length;
+        totalViews += history.filter(
+          (r) => !isHandledUser(handledFilter, r.userId),
+        ).length;
       }
     }
     return totalViews;
   }
 
-  private async getShowWatchers(itemId: string): Promise<string[]> {
+  private async getShowWatchers(
+    itemId: string,
+    handledFilter?: HandledUserFilter,
+  ): Promise<string[]> {
     const watchHistory = await this.jellyfinAdapter.getWatchHistory(itemId);
     const users = await this.jellyfinAdapter.getUsers();
     const userMap = new Map(users.map((u) => [u.id, u.name]));
 
     const uniqueViewerIds = [...new Set(watchHistory.map((r) => r.userId))];
-    return uniqueViewerIds.map((id) => userMap.get(id) || id);
+    return uniqueViewerIds
+      .filter((id) => !isHandledUser(handledFilter, id, userMap.get(id)))
+      .map((id) => userMap.get(id) || id);
   }
 
   private async getCollectionNames(

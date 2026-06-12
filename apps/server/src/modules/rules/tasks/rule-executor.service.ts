@@ -90,6 +90,12 @@ export class RuleExecutorService {
       return;
     }
 
+    // preload completed (user, media) combinations so user stats can exclude them
+    if (ruleGroup.excludeHandledUsers) {
+      ruleGroup.handledUserCompletions =
+        await this.rulesService.getRuleActionCompletions(ruleGroup.id);
+    }
+
     try {
       abortSignal.throwIfAborted();
 

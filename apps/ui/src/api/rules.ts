@@ -92,6 +92,7 @@ export interface RuleGroupCreatePayload {
   dataType: MediaItemType
   notifications: AgentConfiguration[]
   ruleHandlerCronSchedule: string | null
+  excludeHandledUsers: boolean
 }
 
 export type RuleGroupUpdatePayload = RuleGroupCreatePayload & { id: number }

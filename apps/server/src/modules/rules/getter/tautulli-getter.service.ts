@@ -16,6 +16,10 @@ import {
     RuleConstants,
 } from '../constants/rules.constants';
 import { RulesDto } from '../dtos/rules.dto';
+import {
+  getHandledUserFilter,
+  isHandledUser,
+} from '../helpers/handled-user-filter.helper';
 
 @Injectable()
 export class TautulliGetterService {
@@ -50,6 +54,14 @@ export class TautulliGetterService {
       const tautulliWatchedPercentOverride =
         collection.tautulliWatchedPercentOverride;
 
+      // users whose stats are excluded because the rule's action already ran
+      // for them on this media item (see RuleGroup.excludeHandledUsers)
+      const handledFilter = getHandledUserFilter(ruleGroup, {
+        id: libItem.id,
+        parentId: libItem.parentId,
+        grandparentId: libItem.grandparentId,
+      });
+
       switch (prop.name) {
         case 'seenBy':
         case 'sw_watchers': {
@@ -64,9 +76,12 @@ export class TautulliGetterService {
               )
               .map((el) => el.user_id);
 
-            const uniqueViewerIds = [...new Set(viewerIds)];
-            const plexUsernames =
-              await this.getPlexUsernamesForIds(uniqueViewerIds);
+            const uniqueViewerIds = [...new Set(viewerIds)].filter(
+              (id) => !isHandledUser(handledFilter, id),
+            );
+            const plexUsernames = (
+              await this.getPlexUsernamesForIds(uniqueViewerIds)
+            ).filter((name) => !isHandledUser(handledFilter, undefined, name));
 
             return plexUsernames;
           } else {
@@ -118,9 +133,13 @@ export class TautulliGetterService {
           }
 
           if (allViewers.length > 0) {
-            const plexUsernames = await this.getPlexUsernamesForIds(
-              allViewers.map((x) => x.user_id),
-            );
+            const plexUsernames = (
+              await this.getPlexUsernamesForIds(
+                allViewers
+                  .map((x) => x.user_id)
+                  .filter((id) => !isHandledUser(handledFilter, id)),
+              )
+            ).filter((name) => !isHandledUser(handledFilter, undefined, name));
             return plexUsernames;
           }
 
@@ -132,11 +151,13 @@ export class TautulliGetterService {
         case 'viewCount':
         case 'sw_amountOfViews': {
           const history = await this.getHistoryForMetadata(metadata);
-          const watchedContent = history.filter((x) =>
-            tautulliWatchedPercentOverride != null
-              ? x.percent_complete >= tautulliWatchedPercentOverride
-              : x.watched_status == 1,
-          );
+          const watchedContent = history
+            .filter((x) =>
+              tautulliWatchedPercentOverride != null
+                ? x.percent_complete >= tautulliWatchedPercentOverride
+                : x.watched_status == 1,
+            )
+            .filter((x) => !isHandledUser(handledFilter, x.user_id));
           return watchedContent.length;
         }
         case 'lastViewedAt': {
@@ -148,6 +169,7 @@ export class TautulliGetterService {
                 ? x.percent_complete >= tautulliWatchedPercentOverride
                 : x.watched_status == 1,
             )
+            .filter((x) => !isHandledUser(handledFilter, x.user_id))
             .map((el) => el.stopped)
             .sort()
             .reverse();
@@ -165,6 +187,7 @@ export class TautulliGetterService {
                 ? x.percent_complete >= tautulliWatchedPercentOverride
                 : x.watched_status == 1,
             )
+            .filter((x) => !isHandledUser(handledFilter, x.user_id))
             .map((x) => x.rating_key);
 
           const uniqueEpisodes = [...new Set(watchedEpisodes)];
@@ -180,6 +203,7 @@ export class TautulliGetterService {
                 ? x.percent_complete >= tautulliWatchedPercentOverride
                 : x.watched_status == 1,
             )
+            .filter((x) => !isHandledUser(handledFilter, x.user_id))
             .map((x) => x.rating_key);
 
           const pctUniqueEpisodes = [...new Set(pctWatchedEpisodes)];
@@ -208,7 +232,13 @@ export class TautulliGetterService {
             : 0;
         }
         case 'sw_lastWatched': {
-          let history = await this.getHistoryForMetadata(metadata);
+          let history = (await this.getHistoryForMetadata(metadata)).filter(
+            (x) => !isHandledUser(handledFilter, x.user_id),
+          );
+
+          if (history.length === 0) {
+            return null;
+          }
 
           history
             .filter((x) =>
